@@ -1,0 +1,426 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#121212">
+    
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="8dp">
+        
+        <!-- Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="8dp"
+            android:background="#1E1E1E">
+            
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="ARES GENESIS"
+                android:textColor="#00FF00"
+                android:textSize="18sp"
+                android:textStyle="bold"/>
+            
+            <TextView
+                android:id="@+id/deviceStatusText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="DEVICES: ✓✓✗✗"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"/>
+        </LinearLayout>
+        
+        <!-- Card Display Panel -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:background="#252525"
+            android:layout_marginTop="8dp">
+            
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="CURRENT CARD"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold"/>
+            
+            <TextView
+                android:id="@+id/cardNumberText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="**** **** **** ****"
+                android:textColor="#00FF00"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:layout_marginTop="8dp"/>
+            
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                
+                <TextView
+                    android:id="@+id/expiryText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="MM/YY"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"/>
+                
+                <TextView
+                    android:id="@+id/cvvText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="CVV"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"/>
+            </LinearLayout>
+            
+            <TextView
+                android:id="@+id/nameText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="NAME"
+                android:textColor="#AAAAAA"
+                android:textSize="14sp"/>
+            
+            <!-- Bank Info -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="8dp">
+                
+                <TextView
+                    android:id="@+id/bankText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="BANK"
+                    android:textColor="#AAAAAA"
+                    android:textSize="12sp"/>
+                
+                <TextView
+                    android:id="@+id/typeText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="TYPE"
+                    android:textColor="#AAAAAA"
+                    android:textSize="12sp"/>
+                
+                <TextView
+                    android:id="@+id/countryText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="COUNTRY"
+                    android:textColor="#AAAAAA"
+                    android:textSize="12sp"/>
+            </LinearLayout>
+            
+            <!-- Track Data -->
+            <TextView
+                android:id="@+id/track1Text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Track1: "
+                android:textColor="#666666"
+                android:textSize="10sp"
+                android:layout_marginTop="4dp"/>
+            
+            <TextView
+                android:id="@+id/track2Text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Track2: "
+                android:textColor="#666666"
+                android:textSize="10sp"/>
+            
+            <!-- BIN Input -->
+            <EditText
+                android:id="@+id/binText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Enter 6-digit BIN"
+                android:inputType="number"
+                android:maxLength="6"
+                android:textColor="#FFFFFF"
+                android:layout_marginTop="8dp"/>
+            
+        </LinearLayout>
+        
+        <!-- Control Panel -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="8dp"
+            android:background="#1E1E1E"
+            android:layout_marginTop="8dp">
+            
+            <!-- Primary Buttons -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                
+                <Button
+                    android:id="@+id/generateBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="GENERATE"
+                    android:backgroundTint="#4CAF50"
+                    android:layout_margin="2dp"/>
+                
+                <Button
+                    android:id="@+id/validateBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="VALIDATE"
+                    android:backgroundTint="#2196F3"
+                    android:layout_margin="2dp"/>
+                
+                <Button
+                    android:id="@+id/scanBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="SCAN"
+                    android:backgroundTint="#FF9800"
+                    android:layout_margin="2dp"/>
+            </LinearLayout>
+            
+            <!-- Secondary Buttons -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                
+                <Button
+                    android:id="@+id/cloneBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="CLONE"
+                    android:backgroundTint="#9C27B0"
+                    android:layout_margin="2dp"/>
+                
+                <Button
+                    android:id="@+id/emulateBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="EMULATE"
+                    android:backgroundTint="#E91E63"
+                    android:layout_margin="2dp"/>
+                
+                <Button
+                    android:id="@+id/attackBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="ATTACK"
+                    android:backgroundTint="#FF5722"
+                    android:layout_margin="2dp"/>
+            </LinearLayout>
+            
+            <!-- Tertiary Buttons -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                
+                <Button
+                    android:id="@+id/stealthBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="STEALTH"
+                    android:backgroundTint="#607D8B"
+                    android:layout_margin="2dp"/>
+                
+                <Button
+                    android:id="@+id/cloudSyncBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="CLOUD"
+                    android:backgroundTint="#3F51B5"
+                    android:layout_margin="2dp"/>
+                
+                <Button
+                    android:id="@+id/liveTestBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="LIVE TEST"
+                    android:backgroundTint="#F44336"
+                    android:layout_margin="2dp"/>
+            </LinearLayout>
+            
+            <!-- Toggles -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="8dp">
+                
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+                    
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Auto-Validate"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp"/>
+                    
+                    <Switch
+                        android:id="@+id/autoValidateToggle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"/>
+                </LinearLayout>
+                
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+                    
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Live Generation"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp"/>
+                    
+                    <Switch
+                        android:id="@+id/liveGenToggle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"/>
+                </LinearLayout>
+                
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+                    
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Stealth Mode"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp"/>
+                    
+                    <Switch
+                        android:id="@+id/stealthToggle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"/>
+                </LinearLayout>
+                
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+                    
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Bypass AVS"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp"/>
+                    
+                    <Switch
+                        android:id="@+id/bypassAvsToggle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"/>
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+        
+        <!-- Database Stats -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:background="#252525"
+            android:layout_marginTop="8dp"
+            android:padding="8dp">
+            
+            <TextView
+                android:id="@+id/statsText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Stats loading..."
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:typeface="monospace"/>
+            
+            <Button
+                android:id="@+id/dumpBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="EXPORT"
+                android:backgroundTint="#795548"/>
+        </LinearLayout>
+        
+        <!-- Card List -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CARD DATABASE"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginTop="8dp"/>
+        
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/cardsRecyclerView"
+            android:layout_width="match_parent"
+            android:layout_height="300dp"
+            android:background="#1E1E1E"/>
+        
+        <!-- Status Bar -->
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="READY"
+            android:textColor="#00FF00"
+            android:textSize="12sp"
+            android:background="#000000"
+            android:padding="4dp"
+            android:layout_marginTop="8dp"/>
+        
+        <!-- Log Output -->
+        <TextView
+            android:id="@+id/logText"
+            android:layout_width="match_parent"
+            android:layout_height="200dp"
+            android:text="Log output..."
+            android:textColor="#AAAAAA"
+            android:textSize="10sp"
+            android:background="#000000"
+            android:typeface="monospace"
+            android:scrollbars="vertical"
+            android:padding="4dp"
+            android:layout_marginTop="8dp"/>
+        
+    </LinearLayout>
+</ScrollView>

